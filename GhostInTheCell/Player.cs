@@ -11,6 +11,7 @@ internal class Player
         int factoryCount = int.Parse(Console.ReadLine()); // the number of factories
         int linkCount = int.Parse(Console.ReadLine()); // the number of links between factories
         List<Link> map = new List<Link>();
+        bool isbombingAvailable = true;
         for (int i = 0; i < linkCount; i++)
         {
             inputs = Console.ReadLine().Split(' ');
@@ -20,9 +21,12 @@ internal class Player
             map.Add(new Link(factory1, factory2, distance));
         }
 
+        List<string> commands = new List<string>();
+
         // game loop
         while (true)
         {
+            commands.Clear(); // Reset commands each turn.
             List<Entity> entities = new List<Entity>();
             int entityCount = int.Parse(Console.ReadLine()); // the number of entities (e.g. factories and troops)
             for (int i = 0; i < entityCount; i++)
@@ -31,64 +35,174 @@ internal class Player
                 ParseEntity(inputs, entities);
             }
 
-            List<Entity> sources = entities.Where(e => e.IsFriendly && e.GetType() == typeof(Factory)).ToList();
-            List<Entity> targets = entities.Where(e => !e.IsFriendly && e.GetType() == typeof(Factory)).ToList();
-            List<Entity> bombTargets = entities.Where(e => e.IsHostile && e.GetType() == typeof(Factory)).ToList();
-            List<string> commands = new List<string>();
-            foreach (Entity entity in sources)
+            List<Factory> factories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
+            List<Factory> friendlyFactories = factories.Where(e => e.IsFriendly).ToList();
+            List<Factory> enemyFactories = factories.Where(e => !e.IsFriendly).ToList();
+            List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
+                .Select(t => (Troop)t).ToList();
+            List<Bomb> bombs = entities.Where(e => e.GetType() == typeof(Bomb)).Select(b => (Bomb)b)
+                .ToList();
+
+            if (isbombingAvailable)
             {
-                Factory source = (Factory)entity;
-                if (source.Production < 3 && source.Defense > 10)
+                Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
+                List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
+                int bombTarget = enemyFactories.Where(t => linkedFactories.Contains(t.Id))
+                    .OrderByDescending(t => t.Production).First().Id;
+                commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
+                commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
+                isbombingAvailable = false;
+            }
+
+            foreach (Factory factory in friendlyFactories)
+            {
+                int availableCyborgs = CalculateDefenses(factory, enemyTroops);
+                availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
+                if (ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
                 {
-                    commands.Add($"INC {source.Id}");
+                    availableCyborgs -= 10;
+                    commands.Add($"INC {factory.Id}");
                 }
-                if (!targets.Any()) // This is not good enough anymore. Must be able to defend friendly factories.
+
+                int target = FindTarget(factory, enemyFactories, bombs, map);
+                if (target == factory.Id)
                 {
-                    commands.Add("WAIT");
                     continue;
                 }
-                string destination = GetDestination(source, map.Where(m => m.Factory1 == source.Id || m.Factory2 == source.Id), targets);
-                if (bombTargets.Any()) // This is not good enough. Need better bomb logic.
+                int path = FindPath(factory, target, map, factories);
+                if (availableCyborgs > 0)
                 {
-                    commands.Add($"BOMB {source.Id} {bombTargets.First().Id}");
-                }
-                if (source.Defense <= 4 && source.Production > 0)
-                {
-                    commands.Add("WAIT");
-                }
-                else
-                {
-                    int count = source.Defense / 2;
-                    commands.Add($"MOVE {source.Id} {destination} {count}");
+                    commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
                 }
             }
 
+            if (commands.Count == 0)
+            {
+                commands.Add("WAIT");
+            }
             Console.WriteLine(string.Join(';', commands));
             // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
         }
     }
 
-    private static string GetDestination(Factory source, IEnumerable<Link> proximityFactories, List<Entity> targets)
+    private static int DefendFactories(Factory source, int availableCyborgs, List<Factory> friendlyFactories, List<Troop> enemyTroops, List<Link> map, List<string> commands)
     {
-        List<Target> closestTargets = new List<Target>();
-        foreach (Link factory in proximityFactories.OrderBy(p => p.Distance))
+        var defenseCandidates = friendlyFactories.Where(f => f.Id != source.Id).Select(f => GetLinkBetween(source, f, map)).Where(f => f.Distance <= 5).OrderBy(f => f.Distance)
+            .Select(f => new { f.Distance, Id = f.Factory1 == source.Id ? f.Factory2 : f.Factory1 }).Take(2);
+        foreach (var candidate in defenseCandidates)
         {
-            if (factory.Factory1 == source.Id && targets.Any(t => t.Id == factory.Factory2))
+            Factory targetFactory = friendlyFactories.First(f => f.Id == candidate.Id);
+            List<Troop> attackers = enemyTroops.Where(t => t.Target == targetFactory.Id).ToList();
+            if (!attackers.Any())
             {
-                Factory candidate = (Factory)targets.First(t => t.Id == factory.Factory2);
-                closestTargets.Add(new Target(candidate.Id, factory.Distance, candidate.Production, candidate.Defense));
+                continue;
             }
-            else if (factory.Factory2 == source.Id && targets.Any(t => t.Id == factory.Factory1))
+
+            int attackingTroops = attackers.Where(t => t.ETA <= candidate.Distance).Sum(t => t.Strength);
+            int defendingTroops = targetFactory.Defense + (targetFactory.Production * candidate.Distance);
+            if (attackingTroops <= defendingTroops)
             {
-                Factory candidate = (Factory)targets.First(t => t.Id == factory.Factory1);
-                closestTargets.Add(new Target(candidate.Id, factory.Distance, candidate.Production, candidate.Defense));
+                continue;
+            }
+
+            int backupRequired = attackingTroops - defendingTroops;
+            int sentBackup = backupRequired > availableCyborgs ? availableCyborgs : backupRequired;
+            commands.Add($"MOVE {source.Id} {candidate.Id} {sentBackup}");
+            return availableCyborgs - sentBackup;
+        }
+
+        return availableCyborgs;
+    }
+
+    // Calculate required defenses five turns ahead, considering already sent enemy troops.
+    // Does not evaluate enemy troops not sent yet by close enemy factories.
+    private static int CalculateDefenses(Factory source, List<Troop> enemyTroops)
+    {
+        List<Troop> attackers = enemyTroops.Where(t => t.Target == source.Id && t.ETA <= 5).ToList();
+        if (attackers.Count == 0)
+        {
+            return source.Defense;
+        }
+        int incomingAttackers = attackers.Sum(t => t.Strength);
+        if (source.Defense > incomingAttackers)
+        {
+            return source.Defense - incomingAttackers;
+        }
+
+        return 0;
+    }
+
+    private static int FindPath(Factory source, int targetFactoryId, List<Link> map, List<Factory> factories)
+    {
+        Link directPath = map.First(l =>
+            (l.Factory1 == source.Id && l.Factory2 == targetFactoryId) ||
+            l.Factory1 == targetFactoryId && l.Factory2 == source.Id);
+        int directDistance = directPath.Distance;
+        IEnumerable<Link> alternativePaths = map.Where(l => l.Factory1 == source.Id || l.Factory2 == source.Id).Where(l =>
+            !(l.Factory1 == source.Id && l.Factory2 == targetFactoryId) &&
+            !(l.Factory1 == targetFactoryId && l.Factory2 == source.Id));
+        List<Factory> candidates = new List<Factory>();
+        foreach (Link alternativePath in alternativePaths)
+        {
+            int intermediateDistance = alternativePath.Distance;
+            int intermediateFactoryId = alternativePath.Factory1 == source.Id
+                ? alternativePath.Factory2
+                : alternativePath.Factory1;
+            Link directPathFromIntermediate =
+                map.First(l =>
+                    (l.Factory1 == intermediateFactoryId && l.Factory2 == targetFactoryId) ||
+                    l.Factory2 == intermediateFactoryId && l.Factory1 == targetFactoryId);
+            if (intermediateDistance + directPathFromIntermediate.Distance <= directDistance)
+            {
+                Factory intermediateFactory = factories.First(f => f.Id == intermediateFactoryId);
+                intermediateFactory.DistanceTo = intermediateDistance;
+                candidates.Add(intermediateFactory);
             }
         }
-        if (closestTargets.Any())
+
+        if (candidates.Any())
         {
-            return closestTargets.OrderBy(t => t.Priority).ThenBy(t => t.Defense).First().Id.ToString();
+            return candidates.OrderBy(c => c.DistanceTo).ThenByDescending(c => c.Production).First().Id;
         }
-        return targets.OrderByDescending(t => ((Factory)t).Production).ThenBy(t => ((Factory)t).Defense).First().Id.ToString();
+        return targetFactoryId;
+    }
+
+    private static int FindTarget(Factory source, List<Factory> targets, List<Bomb> friendlyBombs, List<Link> map)
+    {
+        if (targets.Count == 0)
+        {
+            return source.Id;
+        }
+
+        IOrderedEnumerable<Factory> prioritizedTargets = targets.OrderByDescending(t => t.Production).ThenBy(t => t.Defense);
+        foreach (Factory candidate in prioritizedTargets)
+        {
+            Link link = GetLinkBetween(source, candidate, map);
+            if (friendlyBombs.All(b => b.ETA != link.Distance && b.ETA != link.Distance + 1))
+            {
+                return candidate.Id;
+            }
+        }
+        return source.Id;
+    }
+
+    private static Link GetLinkBetween(Factory source, Factory target, List<Link> map)
+    {
+        return map.First(l =>
+            (l.Factory1 == source.Id && l.Factory2 == target.Id) ||
+            (l.Factory1 == target.Id && l.Factory2 == source.Id));
+    }
+
+    private static List<int> GetClosestXLinkedFactories(Factory enemyHq, List<Link> map, int take)
+    {
+        IEnumerable<Link> links = map.Where(m => m.Factory1 == enemyHq.Id || m.Factory2 == enemyHq.Id).OrderBy(l => l.Distance)
+            .Take(take);
+        return links.Select(link => link.Factory1 == enemyHq.Id ? link.Factory2 : link.Factory1).ToList();
+    }
+
+    private static bool ShouldIncreaseProduction(Factory source, int factoryCount, int availableCyborgs, bool bombPresent)
+    {
+        return source.Production != 3 && factoryCount >= 3 && availableCyborgs >= 10 && !bombPresent;
     }
 
     private static void ParseEntity(string[] inputs, List<Entity> entities)
@@ -156,14 +270,16 @@ internal class Player
     public class Target
     {
         public int Id { get; }
-        public int Priority { get; }
         public int Defense { get; }
+        public int Distance { get; }
+        public int Production { get; }
 
         public Target(int id, int distance, int production, int defense)
         {
             Id = id;
+            Distance = distance;
+            Production = production;
             Defense = defense;
-            Priority = production == 0 ? 10 * distance : distance / production;
         }
     }
     public class Entity
@@ -189,6 +305,7 @@ internal class Player
         public int Defense { get; set; }
         public int Production { get; set; }
         public int Cooldown { get; set; }
+        public int DistanceTo { get; set; }
     }
 
     public class Bomb : Entity
