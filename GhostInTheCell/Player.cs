@@ -7,6 +7,7 @@ internal class Player
 {
     private static void Main(string[] args)
     {
+        bool firstRound = true;
         string[] inputs;
         int factoryCount = int.Parse(Console.ReadLine()); // the number of factories
         int linkCount = int.Parse(Console.ReadLine()); // the number of links between factories
@@ -74,30 +75,38 @@ internal class Player
                 isbombingAvailable = false;
             }
 
-            foreach (Factory factory in friendlyFactories)
+            if (firstRound)
             {
-                if (ShouldEvacuateFactory(factory, bombState, factories, map))
+                ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories, commands);
+                firstRound = false;
+            }
+            else
+            {
+                foreach (Factory factory in friendlyFactories)
                 {
-                    commands.AddRange(Evacuate(friendlyFactories, factory, map));
-                    continue;
-                }
-                int availableCyborgs = CalculateDefenses(factory, enemyTroops);
-                availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
-                if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
-                {
-                    availableCyborgs -= 10;
-                    commands.Add($"INC {factory.Id}");
-                }
+                    if (ShouldEvacuateFactory(factory, bombState, factories, map))
+                    {
+                        commands.AddRange(Evacuate(friendlyFactories, factory, map));
+                        continue;
+                    }
+                    int availableCyborgs = CalculateDefenses(factory, enemyTroops);
+                    availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
+                    if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
+                    {
+                        availableCyborgs -= 10;
+                        commands.Add($"INC {factory.Id}");
+                    }
 
-                int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
-                if (target == factory.Id)
-                {
-                    continue;
-                }
-                int path = FindPath(factory, target, map, factories);
-                if (availableCyborgs > 0)
-                {
-                    commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
+                    int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
+                    if (target == factory.Id)
+                    {
+                        continue;
+                    }
+                    int path = FindPath(factory, target, map, factories);
+                    if (availableCyborgs > 0)
+                    {
+                        commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
+                    }
                 }
             }
 
@@ -107,6 +116,26 @@ internal class Player
             }
             Console.WriteLine(string.Join(';', commands));
             // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
+        }
+    }
+
+    private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories, List<string> commands)
+    {
+        Factory hq = friendlyFactories.First();
+        List<int> closestTargets = GetClosestXLinkedFactories(hq, map, 4);
+        IOrderedEnumerable<Factory> prioritizedTargets = nonFriendlyFactories.Where(f => closestTargets.Contains(f.Id))
+            .OrderByDescending(f => (f.Production * 10) / (f.Defense + 1));
+        int availableCyborgs = hq.Defense;
+        foreach (Factory target in prioritizedTargets)
+        {
+            if (availableCyborgs < target.Defense)
+            {
+                continue;
+            }
+
+            int requiredForces = target.Defense + 1;
+            commands.Add($"MOVE {hq.Id} {target.Id} {requiredForces}");
+            availableCyborgs -= requiredForces;
         }
     }
 
