@@ -28,95 +28,100 @@ internal class Player
         // game loop
         while (true)
         {
-            commands.Clear(); // Reset commands each turn.
-            List<Entity> entities = new List<Entity>();
-            int entityCount = int.Parse(Console.ReadLine()); // the number of entities (e.g. factories and troops)
-            for (int i = 0; i < entityCount; i++)
-            {
-                inputs = Console.ReadLine().Split(' ');
-                ParseEntity(inputs, entities);
-            }
+            UpdateGame(ref firstRound, ref inputs, map, ref isbombingAvailable, commands, bombState);
+        }
+    }
 
-            List<Factory> factories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
-            List<Factory> friendlyFactories = factories.Where(e => e.IsFriendly).ToList();
-            List<Factory> nonFriendlyFactories = factories.Where(e => !e.IsFriendly).ToList();
-            List<Factory> hostileFactories = factories.Where(e => e.IsHostile).ToList();
-            bool aheadInProduction = false;
-            if (friendlyFactories.Any() && hostileFactories.Any())
-            {
-                int production = friendlyFactories.Sum(f => f.Production);
-                int enemyProduction = hostileFactories.Sum(f => f.Production);
-                string productionMessage = null;
-                if (production == enemyProduction)
-                {
-                    productionMessage = "It is a tie!";
-                }
-                else
-                {
-                    aheadInProduction = production > enemyProduction;
-                    productionMessage = aheadInProduction ? "We are stronger!" : "The enemy is stronger!";
-                }
-                commands.Add($"MSG {productionMessage}");
-            }
-            List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
-                .Select(t => (Troop)t).ToList();
-            List<Bomb> bombs = entities.Where(e => e.GetType() == typeof(Bomb)).Select(b => (Bomb)b)
-                .ToList();
-            UpdateBombState(bombs, bombState);
+    private static void UpdateGame(ref bool firstRound, ref string[] inputs, List<Link> map, ref bool isbombingAvailable, List<string> commands, List<Bomb> bombState)
+    {
+        commands.Clear(); // Reset commands each turn.
+        List<Entity> entities = new List<Entity>();
+        int entityCount = int.Parse(Console.ReadLine()); // the number of entities (e.g. factories and troops)
+        for (int i = 0; i < entityCount; i++)
+        {
+            inputs = Console.ReadLine().Split(' ');
+            ParseEntity(inputs, entities);
+        }
 
-            if (isbombingAvailable)
+        List<Factory> factories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
+        List<Factory> friendlyFactories = factories.Where(e => e.IsFriendly).ToList();
+        List<Factory> nonFriendlyFactories = factories.Where(e => !e.IsFriendly).ToList();
+        List<Factory> hostileFactories = factories.Where(e => e.IsHostile).ToList();
+        bool aheadInProduction = false;
+        if (friendlyFactories.Any() && hostileFactories.Any())
+        {
+            int production = friendlyFactories.Sum(f => f.Production);
+            int enemyProduction = hostileFactories.Sum(f => f.Production);
+            string productionMessage = null;
+            if (production == enemyProduction)
             {
-                Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
-                List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
-                int bombTarget = nonFriendlyFactories.Where(t => linkedFactories.Contains(t.Id))
-                    .OrderByDescending(t => t.Production).First().Id;
-                commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
-                commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
-                isbombingAvailable = false;
-            }
-
-            if (firstRound)
-            {
-                ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories, commands);
-                firstRound = false;
+                productionMessage = "It is a tie!";
             }
             else
             {
-                foreach (Factory factory in friendlyFactories)
-                {
-                    if (ShouldEvacuateFactory(factory, bombState, factories, map))
-                    {
-                        commands.AddRange(Evacuate(friendlyFactories, factory, map));
-                        continue;
-                    }
-                    int availableCyborgs = CalculateDefenses(factory, enemyTroops);
-                    availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
-                    if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
-                    {
-                        availableCyborgs -= 10;
-                        commands.Add($"INC {factory.Id}");
-                    }
+                aheadInProduction = production > enemyProduction;
+                productionMessage = aheadInProduction ? "We are stronger!" : "The enemy is stronger!";
+            }
+            commands.Add($"MSG {productionMessage}");
+        }
+        List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
+            .Select(t => (Troop)t).ToList();
+        List<Bomb> bombs = entities.Where(e => e.GetType() == typeof(Bomb)).Select(b => (Bomb)b)
+            .ToList();
+        UpdateBombState(bombs, bombState);
 
-                    int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
-                    if (target == factory.Id)
-                    {
-                        continue;
-                    }
-                    int path = FindPath(factory, target, map, factories);
-                    if (availableCyborgs > 0)
-                    {
-                        commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
-                    }
+        if (isbombingAvailable)
+        {
+            Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
+            List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
+            int bombTarget = nonFriendlyFactories.Where(t => linkedFactories.Contains(t.Id))
+                .OrderByDescending(t => t.Production).First().Id;
+            commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
+            commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
+            isbombingAvailable = false;
+        }
+
+        if (firstRound)
+        {
+            ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories, commands);
+            firstRound = false;
+        }
+        else
+        {
+            foreach (Factory factory in friendlyFactories)
+            {
+                if (ShouldEvacuateFactory(factory, bombState, factories, map))
+                {
+                    commands.AddRange(Evacuate(friendlyFactories, factory, map));
+                    continue;
+                }
+                int availableCyborgs = CalculateDefenses(factory, enemyTroops);
+                availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
+                if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
+                {
+                    availableCyborgs -= 10;
+                    commands.Add($"INC {factory.Id}");
+                }
+
+                int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
+                if (target == factory.Id)
+                {
+                    continue;
+                }
+                int path = FindPath(factory, target, map, factories);
+                if (availableCyborgs > 0)
+                {
+                    commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
                 }
             }
-
-            if (commands.Count == 0)
-            {
-                commands.Add("WAIT");
-            }
-            Console.WriteLine(string.Join(';', commands));
-            // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
         }
+
+        if (commands.Count == 0)
+        {
+            commands.Add("WAIT");
+        }
+        Console.WriteLine(string.Join(';', commands));
+        // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
     }
 
     private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories, List<string> commands)
