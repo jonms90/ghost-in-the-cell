@@ -28,8 +28,7 @@ internal class Player
         List<string> commands = new List<string>();
         List<Bomb> bombState = new List<Bomb>();
 
-        // game loop
-        while (true)
+        while (true) // game loop
         {
             UpdateGame(map, commands, bombState);
         }
@@ -84,32 +83,7 @@ internal class Player
         }
         else
         {
-            foreach (Factory factory in friendlyFactories)
-            {
-                if (ShouldEvacuateFactory(factory, bombState, factories, map))
-                {
-                    commands.AddRange(Evacuate(friendlyFactories, factory, map));
-                    continue;
-                }
-                int availableCyborgs = CalculateDefenses(factory, enemyTroops);
-                availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
-                if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
-                {
-                    availableCyborgs -= 10;
-                    commands.Add($"INC {factory.Id}");
-                }
-
-                int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
-                if (target == factory.Id)
-                {
-                    continue;
-                }
-                int path = FindPath(factory, target, map, factories);
-                if (availableCyborgs > 0)
-                {
-                    commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
-                }
-            }
+            ExecuteRound(map, commands, bombState, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombs);
         }
 
         if (commands.Count == 0)
@@ -118,6 +92,36 @@ internal class Player
         }
         Console.WriteLine(string.Join(';', commands));
         // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
+    }
+
+    private static void ExecuteRound(List<Link> map, List<string> commands, List<Bomb> bombState, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
+    {
+        foreach (Factory factory in friendlyFactories)
+        {
+            if (ShouldEvacuateFactory(factory, bombState, factories, map))
+            {
+                commands.AddRange(Evacuate(friendlyFactories, factory, map));
+                continue;
+            }
+            int availableCyborgs = CalculateDefenses(factory, enemyTroops);
+            availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
+            if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
+            {
+                availableCyborgs -= 10;
+                commands.Add($"INC {factory.Id}");
+            }
+
+            int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
+            if (target == factory.Id)
+            {
+                continue;
+            }
+            int path = FindPath(factory, target, map, factories);
+            if (availableCyborgs > 0)
+            {
+                commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
+            }
+        }
     }
 
     private static void SendBomb(List<Link> map, List<string> commands, List<Entity> entities, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories)
