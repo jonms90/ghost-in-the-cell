@@ -7,10 +7,11 @@ internal class Player
 {
     private static string[] _inputs;
     private static bool _isBombingAvailable;
+    private static bool _isFirstRound;
 
     private static void Main(string[] args)
     {
-        bool firstRound = true;
+        _isFirstRound = true;
         int factoryCount = int.Parse(Console.ReadLine()); // the number of factories
         int linkCount = int.Parse(Console.ReadLine()); // the number of links between factories
         List<Link> map = new List<Link>();
@@ -30,11 +31,11 @@ internal class Player
         // game loop
         while (true)
         {
-            UpdateGame(ref firstRound, map, commands, bombState);
+            UpdateGame(map, commands, bombState);
         }
     }
 
-    private static void UpdateGame(ref bool firstRound, List<Link> map, List<string> commands, List<Bomb> bombState)
+    private static void UpdateGame(List<Link> map, List<string> commands, List<Bomb> bombState)
     {
         commands.Clear(); // Reset commands each turn.
         List<Entity> entities = new List<Entity>();
@@ -77,10 +78,9 @@ internal class Player
             SendBomb(map, commands, entities, friendlyFactories, nonFriendlyFactories);
         }
 
-        if (firstRound)
+        if (_isFirstRound)
         {
             ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories, commands);
-            firstRound = false;
         }
         else
         {
@@ -149,6 +149,7 @@ internal class Player
             commands.Add($"MOVE {hq.Id} {target.Id} {requiredForces}");
             availableCyborgs -= requiredForces;
         }
+        _isFirstRound = false;
     }
 
     private static void UpdateBombState(List<Bomb> bombs, List<Bomb> bombState)
