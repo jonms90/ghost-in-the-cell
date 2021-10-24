@@ -74,13 +74,7 @@ internal class Player
 
         if (_isBombingAvailable)
         {
-            Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
-            List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
-            int bombTarget = nonFriendlyFactories.Where(t => linkedFactories.Contains(t.Id))
-                .OrderByDescending(t => t.Production).First().Id;
-            commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
-            commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
-            _isBombingAvailable = false;
+            SendBomb(map, commands, entities, friendlyFactories, nonFriendlyFactories);
         }
 
         if (firstRound)
@@ -124,6 +118,17 @@ internal class Player
         }
         Console.WriteLine(string.Join(';', commands));
         // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
+    }
+
+    private static void SendBomb(List<Link> map, List<string> commands, List<Entity> entities, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories)
+    {
+        Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
+        List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
+        int bombTarget = nonFriendlyFactories.Where(t => linkedFactories.Contains(t.Id))
+            .OrderByDescending(t => t.Production).First().Id;
+        commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
+        commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
+        _isBombingAvailable = false;
     }
 
     private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories, List<string> commands)
