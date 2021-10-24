@@ -5,6 +5,7 @@ using System.Linq;
 // To debug: Console.Error.WriteLine("Debug messages...");
 internal class Player
 {
+    private const int MAX_PRODUCTION = 3;
     private static string[] _inputs;
     private static bool _isBombingAvailable;
     private static bool _isFirstRound;
@@ -56,17 +57,20 @@ internal class Player
         {
             int production = friendlyFactories.Sum(f => f.Production);
             int enemyProduction = hostileFactories.Sum(f => f.Production);
-            string productionMessage = null;
             if (production == enemyProduction)
             {
-                productionMessage = "It is a tie!";
+                _commands.Add($"MSG Production is equal!");
             }
             else
             {
-                aheadInProduction = production > enemyProduction;
-                productionMessage = aheadInProduction ? "We are stronger!" : "The enemy is stronger!";
+                int diffBetweenProduction = production - enemyProduction;
+                if(diffBetweenProduction > 2)
+                {
+                    aheadInProduction = true;
+                    _commands.Add($"MSG Production superior!");
+                }
             }
-            _commands.Add($"MSG {productionMessage}");
+            
         }
         List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
             .Select(t => (Troop)t).ToList();
@@ -123,16 +127,24 @@ internal class Player
                 _commands.Add($"INC {factory.Id}");
             }
 
-            int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
-            if (target == factory.Id)
+            if (factory.Production == MAX_PRODUCTION || aheadInProduction)
             {
-                continue;
+                int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
+                if (target == factory.Id)
+                {
+                    continue;
+                }
+                RelocateCyborgs(map, factories, factory, availableCyborgs, target);
             }
-            int path = FindPath(factory, target, map, factories);
-            if (availableCyborgs > 0)
-            {
-                _commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
-            }
+        }
+    }
+
+    private static void RelocateCyborgs(List<Link> map, List<Factory> factories, Factory factory, int availableCyborgs, int target)
+    {
+        int path = FindPath(factory, target, map, factories);
+        if (availableCyborgs > 0)
+        {
+            _commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
         }
     }
 
