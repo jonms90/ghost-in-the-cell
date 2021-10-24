@@ -5,20 +5,22 @@ using System.Linq;
 // To debug: Console.Error.WriteLine("Debug messages...");
 internal class Player
 {
+    private static string[] _inputs;
+    private static bool _isBombingAvailable;
+
     private static void Main(string[] args)
     {
         bool firstRound = true;
-        string[] inputs;
         int factoryCount = int.Parse(Console.ReadLine()); // the number of factories
         int linkCount = int.Parse(Console.ReadLine()); // the number of links between factories
         List<Link> map = new List<Link>();
-        bool isbombingAvailable = true;
+        _isBombingAvailable = true;
         for (int i = 0; i < linkCount; i++)
         {
-            inputs = Console.ReadLine().Split(' ');
-            int factory1 = int.Parse(inputs[0]);
-            int factory2 = int.Parse(inputs[1]);
-            int distance = int.Parse(inputs[2]);
+            _inputs = Console.ReadLine().Split(' ');
+            int factory1 = int.Parse(_inputs[0]);
+            int factory2 = int.Parse(_inputs[1]);
+            int distance = int.Parse(_inputs[2]);
             map.Add(new Link(factory1, factory2, distance));
         }
 
@@ -28,19 +30,19 @@ internal class Player
         // game loop
         while (true)
         {
-            UpdateGame(ref firstRound, ref inputs, map, ref isbombingAvailable, commands, bombState);
+            UpdateGame(ref firstRound, map, commands, bombState);
         }
     }
 
-    private static void UpdateGame(ref bool firstRound, ref string[] inputs, List<Link> map, ref bool isbombingAvailable, List<string> commands, List<Bomb> bombState)
+    private static void UpdateGame(ref bool firstRound, List<Link> map, List<string> commands, List<Bomb> bombState)
     {
         commands.Clear(); // Reset commands each turn.
         List<Entity> entities = new List<Entity>();
         int entityCount = int.Parse(Console.ReadLine()); // the number of entities (e.g. factories and troops)
         for (int i = 0; i < entityCount; i++)
         {
-            inputs = Console.ReadLine().Split(' ');
-            ParseEntity(inputs, entities);
+            _inputs = Console.ReadLine().Split(' ');
+            ParseEntity(_inputs, entities);
         }
 
         List<Factory> factories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
@@ -70,7 +72,7 @@ internal class Player
             .ToList();
         UpdateBombState(bombs, bombState);
 
-        if (isbombingAvailable)
+        if (_isBombingAvailable)
         {
             Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
             List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
@@ -78,7 +80,7 @@ internal class Player
                 .OrderByDescending(t => t.Production).First().Id;
             commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
             commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
-            isbombingAvailable = false;
+            _isBombingAvailable = false;
         }
 
         if (firstRound)
