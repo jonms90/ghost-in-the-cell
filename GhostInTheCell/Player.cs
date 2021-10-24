@@ -9,6 +9,7 @@ internal class Player
     private static bool _isBombingAvailable;
     private static bool _isFirstRound;
     private static List<string> _commands;
+    private static List<Bomb> _bombStates;
 
     private static void Main(string[] args)
     {
@@ -27,15 +28,15 @@ internal class Player
         }
 
         _commands = new List<string>();
-        List<Bomb> bombState = new List<Bomb>();
+        _bombStates = new List<Bomb>();
 
         while (true) // game loop
         {
-            UpdateGame(map, bombState);
+            UpdateGame(map);
         }
     }
 
-    private static void UpdateGame(List<Link> map, List<Bomb> bombState)
+    private static void UpdateGame(List<Link> map)
     {
         _commands.Clear(); // Reset commands each turn.
         List<Entity> entities = new List<Entity>();
@@ -69,9 +70,9 @@ internal class Player
         }
         List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
             .Select(t => (Troop)t).ToList();
-        List<Bomb> bombs = entities.Where(e => e.GetType() == typeof(Bomb)).Select(b => (Bomb)b)
+        List<Bomb> bombsPresent = entities.Where(e => e.GetType() == typeof(Bomb)).Select(b => (Bomb)b)
             .ToList();
-        UpdateBombState(bombs, bombState);
+        UpdateBombStates(bombsPresent);
 
         if (_isBombingAvailable)
         {
@@ -84,7 +85,7 @@ internal class Player
         }
         else
         {
-            ExecuteRound(map, bombState, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombs);
+            ExecuteRound(map, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombsPresent);
         }
 
         ExecuteWaitCommandAsFallback();
@@ -105,11 +106,11 @@ internal class Player
         }
     }
 
-    private static void ExecuteRound(List<Link> map, List<Bomb> bombState, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
+    private static void ExecuteRound(List<Link> map, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
     {
         foreach (Factory factory in friendlyFactories)
         {
-            if (ShouldEvacuateFactory(factory, bombState, factories, map))
+            if (ShouldEvacuateFactory(factory, factories, map))
             {
                 _commands.AddRange(Evacuate(friendlyFactories, factory, map));
                 continue;
@@ -167,17 +168,17 @@ internal class Player
         _isFirstRound = false;
     }
 
-    private static void UpdateBombState(List<Bomb> bombs, List<Bomb> bombState)
+    private static void UpdateBombStates(List<Bomb> bombsPresent)
     {
-        if (!bombs.Any())
+        if (!bombsPresent.Any())
         {
-            bombState.Clear();
+            _bombStates.Clear();
         }
         else
         {
-            bombState.AddRange(bombs.Where(b => !bombState.Select(s => s.Id).Contains(b.Id)));
-            bombState.RemoveAll(b => b.Age == b.ETA);
-            foreach (Bomb b in bombState)
+            _bombStates.AddRange(bombsPresent.Where(b => !_bombStates.Select(s => s.Id).Contains(b.Id)));
+            _bombStates.RemoveAll(b => b.Age == b.ETA);
+            foreach (Bomb b in _bombStates)
             {
                 b.Age++;
             }
@@ -202,14 +203,14 @@ internal class Player
         return new List<string> { $"MSG Evacuating {factory.Id}", $"MOVE {factory.Id} {evacuationTarget} {factory.Defense}" };
     }
 
-    private static bool ShouldEvacuateFactory(Factory factory, List<Bomb> bombs, List<Factory> factories, List<Link> map)
+    private static bool ShouldEvacuateFactory(Factory factory, List<Factory> factories, List<Link> map)
     {
-        if (bombs.Count == 0 || !factories.Any(f => f.IsHostile)) // check hostiles because it crashed when bomb present after winning.
+        if (_bombStates.Count == 0 || !factories.Any(f => f.IsHostile)) // check hostiles left due to bomb crashing code if game already won.
         {
             return false;
         }
 
-        foreach (Bomb bomb in bombs)
+        foreach (Bomb bomb in _bombStates)
         {
             if (bomb.Source == factory.Id)
             { // Target will never be source factory
