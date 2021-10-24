@@ -8,6 +8,7 @@ internal class Player
     private static string[] _inputs;
     private static bool _isBombingAvailable;
     private static bool _isFirstRound;
+    private static List<string> _commands;
 
     private static void Main(string[] args)
     {
@@ -25,18 +26,18 @@ internal class Player
             map.Add(new Link(factory1, factory2, distance));
         }
 
-        List<string> commands = new List<string>();
+        _commands = new List<string>();
         List<Bomb> bombState = new List<Bomb>();
 
         while (true) // game loop
         {
-            UpdateGame(map, commands, bombState);
+            UpdateGame(map, bombState);
         }
     }
 
-    private static void UpdateGame(List<Link> map, List<string> commands, List<Bomb> bombState)
+    private static void UpdateGame(List<Link> map, List<Bomb> bombState)
     {
-        commands.Clear(); // Reset commands each turn.
+        _commands.Clear(); // Reset commands each turn.
         List<Entity> entities = new List<Entity>();
         int entityCount = int.Parse(Console.ReadLine()); // the number of entities (e.g. factories and troops)
         for (int i = 0; i < entityCount; i++)
@@ -64,7 +65,7 @@ internal class Player
                 aheadInProduction = production > enemyProduction;
                 productionMessage = aheadInProduction ? "We are stronger!" : "The enemy is stronger!";
             }
-            commands.Add($"MSG {productionMessage}");
+            _commands.Add($"MSG {productionMessage}");
         }
         List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
             .Select(t => (Troop)t).ToList();
@@ -74,41 +75,51 @@ internal class Player
 
         if (_isBombingAvailable)
         {
-            SendBomb(map, commands, entities, friendlyFactories, nonFriendlyFactories);
+            SendBomb(map, entities, friendlyFactories, nonFriendlyFactories);
         }
 
         if (_isFirstRound)
         {
-            ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories, commands);
+            ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories);
         }
         else
         {
-            ExecuteRound(map, commands, bombState, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombs);
+            ExecuteRound(map, bombState, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombs);
         }
 
-        if (commands.Count == 0)
-        {
-            commands.Add("WAIT");
-        }
-        Console.WriteLine(string.Join(';', commands));
+        ExecuteWaitCommandAsFallback();
+        ExecuteCommands();
         // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
     }
 
-    private static void ExecuteRound(List<Link> map, List<string> commands, List<Bomb> bombState, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
+    private static void ExecuteCommands()
+    {
+        Console.WriteLine(string.Join(';', _commands));
+    }
+
+    private static void ExecuteWaitCommandAsFallback()
+    {
+        if (_commands.Count == 0)
+        {
+            _commands.Add("WAIT");
+        }
+    }
+
+    private static void ExecuteRound(List<Link> map, List<Bomb> bombState, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
     {
         foreach (Factory factory in friendlyFactories)
         {
             if (ShouldEvacuateFactory(factory, bombState, factories, map))
             {
-                commands.AddRange(Evacuate(friendlyFactories, factory, map));
+                _commands.AddRange(Evacuate(friendlyFactories, factory, map));
                 continue;
             }
             int availableCyborgs = CalculateDefenses(factory, enemyTroops);
-            availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map, commands);
+            availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map);
             if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
             {
                 availableCyborgs -= 10;
-                commands.Add($"INC {factory.Id}");
+                _commands.Add($"INC {factory.Id}");
             }
 
             int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
@@ -119,23 +130,23 @@ internal class Player
             int path = FindPath(factory, target, map, factories);
             if (availableCyborgs > 0)
             {
-                commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
+                _commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
             }
         }
     }
 
-    private static void SendBomb(List<Link> map, List<string> commands, List<Entity> entities, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories)
+    private static void SendBomb(List<Link> map, List<Entity> entities, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories)
     {
         Factory enemyHq = (Factory)entities.First(e => e.IsHostile && e.GetType() == typeof(Factory));
         List<int> linkedFactories = GetClosestXLinkedFactories(enemyHq, map, 3);
         int bombTarget = nonFriendlyFactories.Where(t => linkedFactories.Contains(t.Id))
             .OrderByDescending(t => t.Production).First().Id;
-        commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
-        commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
+        _commands.Add($"BOMB {friendlyFactories.First().Id} {enemyHq.Id}");
+        _commands.Add($"BOMB {friendlyFactories.First().Id} {bombTarget}");
         _isBombingAvailable = false;
     }
 
-    private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories, List<string> commands)
+    private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories)
     {
         Factory hq = friendlyFactories.First();
         List<int> closestTargets = GetClosestXLinkedFactories(hq, map, 4);
@@ -150,7 +161,7 @@ internal class Player
             }
 
             int requiredForces = target.Defense + 1;
-            commands.Add($"MOVE {hq.Id} {target.Id} {requiredForces}");
+            _commands.Add($"MOVE {hq.Id} {target.Id} {requiredForces}");
             availableCyborgs -= requiredForces;
         }
         _isFirstRound = false;
@@ -230,7 +241,7 @@ internal class Player
         return bomb.Target == -1;
     }
 
-    private static int DefendFactories(Factory source, int availableCyborgs, List<Factory> friendlyFactories, List<Troop> enemyTroops, List<Link> map, List<string> commands)
+    private static int DefendFactories(Factory source, int availableCyborgs, List<Factory> friendlyFactories, List<Troop> enemyTroops, List<Link> map)
     {
         var defenseCandidates = friendlyFactories.Where(f => f.Id != source.Id).Select(f => GetLinkBetween(source, f, map)).Where(f => f.Distance <= 5).OrderBy(f => f.Distance)
             .Select(f => new { f.Distance, Id = f.Factory1 == source.Id ? f.Factory2 : f.Factory1 }).Take(2);
@@ -252,7 +263,7 @@ internal class Player
 
             int backupRequired = attackingTroops - defendingTroops;
             int sentBackup = backupRequired > availableCyborgs ? availableCyborgs : backupRequired;
-            commands.Add($"MOVE {source.Id} {candidate.Id} {sentBackup}");
+            _commands.Add($"MOVE {source.Id} {candidate.Id} {sentBackup}");
             return availableCyborgs - sentBackup;
         }
 
