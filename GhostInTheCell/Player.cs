@@ -332,13 +332,13 @@ internal class Player
         }
 
         IEnumerable<Factory> prioritizedTargets =
-            targets.Where(t => !t.IsFriendly).OrderByDescending(t => t.Production).Take(3).ToList();
+            targets.Where(t => !t.IsFriendly).OrderByDescending(t => t.Production).ToList();
         int highestScore = 0;
         int highestScoringTarget = prioritizedTargets.First().Id;
         foreach (Factory candidate in prioritizedTargets)
         {
             Link link = GetLinkBetween(source, candidate, map);
-            if (!friendlyBombs.All(b => b.ETA != link.Distance && b.ETA != link.Distance + 1))
+            if (TargetWillBeBombed(friendlyBombs, link))
             {
                 continue;
             }
@@ -351,6 +351,11 @@ internal class Player
             }
         }
         return highestScoringTarget;
+    }
+
+    private static bool TargetWillBeBombed(List<Bomb> friendlyBombs, Link link)
+    {
+        return !friendlyBombs.All(b => b.ETA != link.Distance && b.ETA != link.Distance + 1);
     }
 
     private static Link GetLinkBetween(Factory source, Factory target, List<Link> map)
