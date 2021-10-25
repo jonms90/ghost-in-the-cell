@@ -6,16 +6,22 @@ using System.Linq;
 internal class Player
 {
     private const int MAX_PRODUCTION = 3;
+    private const int UPGRADE_COST = 10;
     private static string[] _inputs;
     private static bool _isBombingAvailable;
     private static bool _isFirstRound;
     private static List<string> _commands;
     private static List<Bomb> _bombStates;
+    private static int _factoryCount;
+    private static List<Factory> _wantedFactories;
+    private static Factory _friendlyHq;
+    private static Factory _enemyHq;
+    private static List<Factory> _allFactories;
 
     private static void Main(string[] args)
     {
         _isFirstRound = true;
-        int factoryCount = int.Parse(Console.ReadLine()); // the number of factories
+        _factoryCount = int.Parse(Console.ReadLine());
         int linkCount = int.Parse(Console.ReadLine()); // the number of links between factories
         List<Link> map = new List<Link>();
         _isBombingAvailable = true;
@@ -48,11 +54,11 @@ internal class Player
             ParseEntity(_inputs, entities);
         }
 
-        List<Factory> factories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
-        List<Factory> friendlyFactories = factories.Where(e => e.IsFriendly).ToList();
-        List<Factory> nonFriendlyFactories = factories.Where(e => !e.IsFriendly).ToList();
-        List<Factory> hostileFactories = factories.Where(e => e.IsHostile).ToList();
-        bool aheadInProduction = false;
+        _allFactories = entities.Where(e => e.GetType() == typeof(Factory)).Select(x => (Factory)x).ToList();
+        List<Factory> friendlyFactories = _allFactories.Where(e => e.IsFriendly).ToList();
+        List<Factory> nonFriendlyFactories = _allFactories.Where(e => !e.IsFriendly).ToList();
+        List<Factory> hostileFactories = _allFactories.Where(e => e.IsHostile).ToList();
+        
         if (friendlyFactories.Any() && hostileFactories.Any())
         {
             int production = friendlyFactories.Sum(f => f.Production);
@@ -64,13 +70,12 @@ internal class Player
             else
             {
                 int diffBetweenProduction = production - enemyProduction;
-                if(diffBetweenProduction > 2)
+                if (diffBetweenProduction > 2)
                 {
-                    aheadInProduction = true;
                     _commands.Add($"MSG Production superior!");
                 }
             }
-            
+
         }
         List<Troop> enemyTroops = entities.Where(e => e.IsHostile && e.GetType() == typeof(Troop))
             .Select(t => (Troop)t).ToList();
@@ -85,11 +90,14 @@ internal class Player
 
         if (_isFirstRound)
         {
+            _wantedFactories = _allFactories;
+            _friendlyHq = friendlyFactories.First();
+            _enemyHq = hostileFactories.First();
             ExecuteFirstRound(friendlyFactories, map, nonFriendlyFactories);
         }
         else
         {
-            ExecuteRound(map, factories, friendlyFactories, nonFriendlyFactories, aheadInProduction, enemyTroops, bombsPresent);
+            ExecuteRound(map, friendlyFactories, nonFriendlyFactories, enemyTroops, bombsPresent);
         }
 
         ExecuteWaitCommandAsFallback();
@@ -110,38 +118,61 @@ internal class Player
         }
     }
 
-    private static void ExecuteRound(List<Link> map, List<Factory> factories, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, bool aheadInProduction, List<Troop> enemyTroops, List<Bomb> bombs)
+    private static void ExecuteRound(List<Link> map, List<Factory> friendlyFactories, List<Factory> nonFriendlyFactories, List<Troop> enemyTroops, List<Bomb> bombs)
     {
         foreach (Factory factory in friendlyFactories)
         {
-            if (ShouldEvacuateFactory(factory, factories, map))
+            if (ShouldEvacuateFactory(factory, _allFactories, map))
             {
                 _commands.AddRange(Evacuate(friendlyFactories, factory, map));
                 continue;
             }
-            int availableCyborgs = CalculateDefenses(factory, enemyTroops);
-            availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map);
-            if (!aheadInProduction && ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
-            {
-                availableCyborgs -= 10;
-                _commands.Add($"INC {factory.Id}");
-            }
 
-            if (factory.Production == MAX_PRODUCTION || aheadInProduction)
+            if (factory.Production == 0)
             {
-                int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
-                if (target == factory.Id)
+                if (factory.Defense >= UPGRADE_COST)
                 {
-                    continue;
+                    Console.Error.WriteLine($"{factory.Id}: ZERO PROD UPGRADE!");
+                    _commands.Add($"INC {factory.Id}");
                 }
-                RelocateCyborgs(map, factories, factory, availableCyborgs, target);
+            }
+            else
+            {
+                int availableCyborgs = CalculateDefenses(factory, enemyTroops);
+                availableCyborgs = DefendFactories(factory, availableCyborgs, friendlyFactories, enemyTroops, map);
+                if (ShouldIncreaseProduction(factory, friendlyFactories.Count, availableCyborgs, bombs.Any(b => b.IsHostile)))
+                {
+                    Console.Error.WriteLine($"{factory.Id}: UPGRADE!");
+                    availableCyborgs -= 10;
+                    _commands.Add($"INC {factory.Id}");
+                }
+
+                if(friendlyFactories.Count >= _wantedFactories.Count)
+                {
+                    Factory upgradeTarget = friendlyFactories.FirstOrDefault(f => f.Production == 0 && f.Id != factory.Id);
+                    if (upgradeTarget != null && upgradeTarget.Defense < UPGRADE_COST)
+                    {
+                        Console.Error.WriteLine($"{factory.Id}: UPGRADE TARGET {upgradeTarget.Id}!");
+                        _commands.Add($"MOVE {factory.Id} {upgradeTarget.Id} {UPGRADE_COST - upgradeTarget.Defense}");
+                    }
+                }
+
+                if (factory.Production == MAX_PRODUCTION || friendlyFactories.Count < _wantedFactories.Count)
+                {
+                    int target = FindTarget(factory, nonFriendlyFactories, bombs, map);
+                    if (target != factory.Id)
+                    {
+                        Console.Error.WriteLine($"{factory.Id}: RELOCATE TO {target}!");
+                        RelocateCyborgs(map, factory, availableCyborgs, target);
+                    }
+                }
             }
         }
     }
 
-    private static void RelocateCyborgs(List<Link> map, List<Factory> factories, Factory factory, int availableCyborgs, int target)
+    private static void RelocateCyborgs(List<Link> map, Factory factory, int availableCyborgs, int target)
     {
-        int path = FindPath(factory, target, map, factories);
+        int path = FindPath(factory, target, map);
         if (availableCyborgs > 0)
         {
             _commands.Add($"MOVE {factory.Id} {path} {availableCyborgs}");
@@ -162,8 +193,16 @@ internal class Player
     private static void ExecuteFirstRound(List<Factory> friendlyFactories, List<Link> map, List<Factory> nonFriendlyFactories)
     {
         Factory hq = friendlyFactories.First();
-        List<int> closestTargets = GetClosestXLinkedFactories(hq, map, 4);
-        IOrderedEnumerable<Factory> prioritizedTargets = nonFriendlyFactories.Where(f => closestTargets.Contains(f.Id))
+        var requiredExpansions = (_factoryCount / 2);
+        List<int> closestExpansions = GetClosestXLinkedFactories(hq, map, requiredExpansions);
+        _wantedFactories = _wantedFactories.Where(f => closestExpansions.Contains(f.Id)).ToList();
+        _wantedFactories.Add(hq);
+        Console.Error.WriteLine("Wanted factories:");
+        foreach(var f in _wantedFactories)
+        {
+            Console.Error.WriteLine(f.Id);
+        }
+        IOrderedEnumerable<Factory> prioritizedTargets = nonFriendlyFactories.Where(f => closestExpansions.Contains(f.Id))
             .OrderByDescending(f => (f.Production * 10) / (f.Defense + 1));
         int availableCyborgs = hq.Defense;
         foreach (Factory target in prioritizedTargets)
@@ -256,8 +295,8 @@ internal class Player
 
     private static int DefendFactories(Factory source, int availableCyborgs, List<Factory> friendlyFactories, List<Troop> enemyTroops, List<Link> map)
     {
-        var defenseCandidates = friendlyFactories.Where(f => f.Id != source.Id).Select(f => GetLinkBetween(source, f, map)).Where(f => f.Distance <= 5).OrderBy(f => f.Distance)
-            .Select(f => new { f.Distance, Id = f.Factory1 == source.Id ? f.Factory2 : f.Factory1 }).Take(2);
+        var defenseCandidates = friendlyFactories.Where(f => f.Id != source.Id).Select(f => GetLinkBetween(source, f, map)).Where(f => f.Distance <= 6).OrderBy(f => f.Distance)
+            .Select(f => new { f.Distance, Id = f.Factory1 == source.Id ? f.Factory2 : f.Factory1 }).Take(3);
         foreach (var candidate in defenseCandidates)
         {
             Factory targetFactory = friendlyFactories.First(f => f.Id == candidate.Id);
@@ -283,11 +322,11 @@ internal class Player
         return availableCyborgs;
     }
 
-    // Calculate required defenses five turns ahead, considering already sent enemy troops.
+    // Calculate required defenses six turns ahead, considering already sent enemy troops.
     // Does not evaluate enemy troops not sent yet by close enemy factories.
     private static int CalculateDefenses(Factory source, List<Troop> enemyTroops)
     {
-        List<Troop> attackers = enemyTroops.Where(t => t.Target == source.Id && t.ETA <= 5).ToList();
+        List<Troop> attackers = enemyTroops.Where(t => t.Target == source.Id && t.ETA <= 6).ToList();
         if (attackers.Count == 0)
         {
             return source.Defense;
@@ -301,7 +340,7 @@ internal class Player
         return 0;
     }
 
-    private static int FindPath(Factory source, int targetFactoryId, List<Link> map, List<Factory> factories)
+    private static int FindPath(Factory source, int targetFactoryId, List<Link> map)
     {
         Link directPath = map.First(l =>
             (l.Factory1 == source.Id && l.Factory2 == targetFactoryId) ||
@@ -323,7 +362,7 @@ internal class Player
                     l.Factory2 == intermediateFactoryId && l.Factory1 == targetFactoryId);
             if (intermediateDistance + directPathFromIntermediate.Distance <= directDistance)
             {
-                Factory intermediateFactory = factories.First(f => f.Id == intermediateFactoryId);
+                Factory intermediateFactory = _allFactories.First(f => f.Id == intermediateFactoryId);
                 intermediateFactory.DistanceTo = intermediateDistance;
                 candidates.Add(intermediateFactory);
             }
@@ -338,31 +377,26 @@ internal class Player
 
     private static int FindTarget(Factory source, List<Factory> targets, List<Bomb> friendlyBombs, List<Link> map)
     {
-        if (targets.Count == 0)
+        if (_wantedFactories.All(f => _allFactories.First(a => a.Id == f.Id).IsFriendly))
         {
-            return source.Id;
+            // If we control the required factories, send troops to front line.
+            var candidates = _wantedFactories.Where(f => f.Id != source.Id && !TargetWillBeBombed(friendlyBombs, GetLinkBetween(source, f, map)))
+                .OrderBy(f => GetLinkBetween(f, _enemyHq, map).Distance);
+            var selectedTarget = candidates.FirstOrDefault()?.Id ?? source.Id;
+            Console.Error.WriteLine($"{source.Id} selected target {selectedTarget}");
+            return selectedTarget;
         }
-
-        IEnumerable<Factory> prioritizedTargets =
-            targets.Where(t => !t.IsFriendly).OrderByDescending(t => t.Production).ToList();
-        int highestScore = 0;
-        int highestScoringTarget = prioritizedTargets.First().Id;
-        foreach (Factory candidate in prioritizedTargets)
+        else
         {
-            Link link = GetLinkBetween(source, candidate, map);
-            if (TargetWillBeBombed(friendlyBombs, link))
-            {
-                continue;
-            }
-
-            int candidateScore = (10 - link.Distance) * candidate.Production;
-            if (candidateScore > highestScore)
-            {
-                highestScore = candidateScore;
-                highestScoringTarget = candidate.Id;
-            }
+            Console.Error.WriteLine($"HQ: {_friendlyHq.Id}");
+            var candidates = _wantedFactories.Where(f => f.Id != source.Id && f.Id != _friendlyHq.Id && !TargetWillBeBombed(friendlyBombs, GetLinkBetween(source, f, map)))
+                .OrderBy(f => _allFactories.Find(a => a.Id == f.Id).Team).ThenBy(f => GetLinkBetween(f, _friendlyHq, map).Distance);
+            Console.Error.WriteLine(string.Join(" ", candidates.Select(c => c.Id)));
+            Console.Error.WriteLine(string.Join(" ", candidates.Select(c => c.Team)));
+            var selectedTarget = candidates.FirstOrDefault()?.Id ?? source.Id;
+            Console.Error.WriteLine($"{source.Id} selected target {selectedTarget}");
+            return selectedTarget;
         }
-        return highestScoringTarget;
     }
 
     private static bool TargetWillBeBombed(List<Bomb> friendlyBombs, Link link)
@@ -381,16 +415,16 @@ internal class Player
             (l.Factory1 == target.Id && l.Factory2 == source.Id));
     }
 
-    private static List<int> GetClosestXLinkedFactories(Factory enemyHq, List<Link> map, int take)
+    private static List<int> GetClosestXLinkedFactories(Factory source, List<Link> map, int take)
     {
-        IEnumerable<Link> links = map.Where(m => m.Factory1 == enemyHq.Id || m.Factory2 == enemyHq.Id).OrderBy(l => l.Distance)
+        IEnumerable<Link> links = map.Where(m => m.Factory1 == source.Id || m.Factory2 == source.Id).OrderBy(l => l.Distance)
             .Take(take);
-        return links.Select(link => link.Factory1 == enemyHq.Id ? link.Factory2 : link.Factory1).ToList();
+        return links.Select(link => link.Factory1 == source.Id ? link.Factory2 : link.Factory1).ToList();
     }
 
     private static bool ShouldIncreaseProduction(Factory source, int factoryCount, int availableCyborgs, bool bombPresent)
     {
-        return source.Production != 3 && factoryCount >= 2 && availableCyborgs >= 10 && !bombPresent;
+        return source.Production != MAX_PRODUCTION && factoryCount >= _wantedFactories.Count && availableCyborgs >= 10 && !bombPresent;
     }
 
     private static void ParseEntity(string[] inputs, List<Entity> entities)
